@@ -4,6 +4,8 @@ namespace pure
 {
     public struct MethodAnalysis
     {
+        public MethodKind Kind;
+        public bool NoDeclaration;
         public string Name;
         public bool HasVoidReturn;
         public bool HasOutParams;
@@ -23,7 +25,8 @@ namespace pure
             !HasVoidReturn && !HasOutParams && !HasImpureCalls && !HasNonLocalReads && !HasNonLocalWrites &&
             !HasNew && !HasUnsafe && !HasThrows && !HasLocks;
         
-        
+
+
         public List<VariableAccess> NonLocalReads;
         public List<VariableAccess> NonLocalWrites;
 
@@ -40,5 +43,10 @@ namespace pure
         public int Line;
         public int Character;
         public int SpanStart;
+    }
+
+    public enum MethodKind
+    {
+        Method, PropertyGetter, PropertySetter, Constructor, Destructor, Operator, ConversionOperator, IndexGetter, IndexSetter
     }
 }

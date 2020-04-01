@@ -17,11 +17,49 @@ namespace HelloWorld
         public static int N = 1;
         public int M;
 
-
-        public string ExpressionMethod()
+        public Data(string s, string s2, int m)
         {
-            return "foobar";
+            S = s;
+            S2 = s2;
+            M = m;
         }
+        
+        public Data(int m) : this("foo", "bar", 1)
+        {
+            N = m;
+        }
+
+        public static implicit operator int(Data d) => N + d.M;
+        public static implicit operator Data(int i) => new Data(i);
+
+        public string ExpressionMethod() => "foobar";
+
+        public int AnotherExpression(int m) => N = m;
+
+        public string S {get; set;}
+
+        public string S2 { get; }
+
+        public int this[int _]
+        {
+            get => N;
+            set => N = value;
+        }
+
+        public string this[string str] => $"foo-{str}-bar";
+
+        public static Data operator -(Data a)
+        {
+            N = a.M;
+            return a;
+        }
+        public static Data operator +(Data a1, Data a2)
+        {
+            return new Data {M = a1.M + a2.M, S = a1.S + a2.S};
+        }
+
+        public static bool operator true(Data d) => d.M.ToString() == d.S;
+        public static bool operator false(Data d) => d.M.ToString() != d.S;
 
         public int X
         {
@@ -52,7 +90,7 @@ namespace HelloWorld
             Func<int, int> YetAnotherLocalFunc = i => { return i - 1; };
 
             // calling local functions apparently is internally done via Func.Invoke, which requires the code of some stdlib assembly
-            // LocalFunc(AnotherLocalFunc(YetAnotherLocalFunc(1)));
+            LocalFunc(AnotherLocalFunc(YetAnotherLocalFunc(1)));
 
             var foo = Program.getInst().foo().Length;
 
@@ -81,6 +119,8 @@ namespace HelloWorld
             var d1 = new Data {M = 1};
             var d2 = new Data();
             d2.M = 2;
+            var foobar = d2["foobar"];
+            d2[1] = 3;
             var num = getNum(d1);
 
             var asdf = new[] {"foo", "bar"};

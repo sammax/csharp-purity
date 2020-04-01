@@ -29,31 +29,128 @@ namespace pure
 
         public IEnumerable<IMethodSymbol> Methods()
         {
-            // TODO: get all methods in the compilation
-            return root.DescendantNodes().OfType<MethodDeclarationSyntax>()
-                .Select(m => model.GetDeclaredSymbol(m));
+            var methodsDeclarations = root.DescendantNodes().OfType<MethodDeclarationSyntax>();
+            var propertyDeclarations = root.DescendantNodes().OfType<BasePropertyDeclarationSyntax>();
+            var constructorDeclarations = root.DescendantNodes().OfType<ConstructorDeclarationSyntax>();
+            var destructorDeclarations = root.DescendantNodes().OfType<DestructorDeclarationSyntax>();
+            var operatorDeclarations = root.DescendantNodes().OfType<OperatorDeclarationSyntax>();
+            var conversionOperatorDeclarations = root.DescendantNodes().OfType<ConversionOperatorDeclarationSyntax>();
+            var indexDeclarations = root.DescendantNodes().OfType<IndexerDeclarationSyntax>();
+            
+            var methodSymbols = methodsDeclarations.Select(m => model.GetDeclaredSymbol(m));
+            var propertySymbols = propertyDeclarations
+                .Select(p => model.GetDeclaredSymbol(p) as IPropertySymbol)
+                .Where(s => s != null)
+                .SelectMany(s => new List<IMethodSymbol>{s.GetMethod, s.SetMethod})
+                .Where(s => s != null);
+            var constructorSymbols = constructorDeclarations.Select(c => model.GetDeclaredSymbol(c));
+            var destructorSymbols = destructorDeclarations.Select(c => model.GetDeclaredSymbol(c));
+            var operatorSymbols = operatorDeclarations.Select(o => model.GetDeclaredSymbol(o));
+            var conversionOperatorSymbols = conversionOperatorDeclarations.Select(o => model.GetDeclaredSymbol(o));
+            var indexSymbols = indexDeclarations
+                .Select(i => model.GetDeclaredSymbol(i) as IPropertySymbol)
+                .Where(i => i != null)
+                .SelectMany(i => new List<IMethodSymbol> {i.GetMethod, i.SetMethod})
+                .Where(i => i != null);
+
+            return methodSymbols
+                .Concat(propertySymbols).Concat(constructorSymbols).Concat(destructorSymbols)
+                .Concat(operatorSymbols).Concat(conversionOperatorSymbols).Concat(indexSymbols);
         }
 
         public MethodAnalysis AnalyzeMethod(IMethodSymbol method)
         {
             if (analyzed.ContainsKey(method)) return analyzed[method];
 
-            // TODO: local functions are not MethodDeclarationSyntax
-            var declaration = method.DeclaringSyntaxReferences.Single().GetSyntax() as MethodDeclarationSyntax;
 
             var methodAnalysis = new MethodAnalysis();
             methodAnalysis.NonLocalReads = new List<VariableAccess>();
             methodAnalysis.NonLocalWrites = new List<VariableAccess>();
-            if (declaration == null || declaration.Body == null)
-                // TODO: analyze expression methods
-                return methodAnalysis;
-
             methodAnalysis.Name = method.ToString();
             methodAnalysis.HasPureAttribute = method.GetAttributes().Any(attribute =>
                 attribute.AttributeClass.ToString() == "System.Diagnostics.Contracts.PureAttribute");
 
+            if (method.DeclaringSyntaxReferences.Length == 0)
+            {
+                methodAnalysis.NoDeclaration = true;
+                return methodAnalysis;
+            }
+            
+            var declaration = method.DeclaringSyntaxReferences.Single().GetSyntax();
+            
+            if (declaration is ArrowExpressionClauseSyntax)
+            {
+                declaration = declaration.Parent;
+            }
+            BlockSyntax body;
+            ArrowExpressionClauseSyntax expressionBody;
+            // TODO: local functions
+            switch (declaration)
+            {
+                case MethodDeclarationSyntax mds:
+                    body = mds.Body;
+                    expressionBody = mds.ExpressionBody;
+                    methodAnalysis.Kind = MethodKind.Method;
+                    break;
+                case AccessorDeclarationSyntax ads:
+                    body = ads.Body;
+                    expressionBody = ads.ExpressionBody;
+                    if (ads.Parent.Parent is IndexerDeclarationSyntax)
+                    {
+                        methodAnalysis.Kind = ads.Kind() == SyntaxKind.GetAccessorDeclaration
+                            ? MethodKind.IndexGetter
+                            : MethodKind.IndexSetter;
+                    }
+                    else
+                    {
+                        methodAnalysis.Kind = ads.Kind() == SyntaxKind.GetAccessorDeclaration
+                            ? MethodKind.PropertyGetter
+                            : MethodKind.PropertySetter;
+                    }
+
+                    break;
+                case ConstructorDeclarationSyntax cds:
+                    body = cds.Body;
+                    expressionBody = cds.ExpressionBody;
+                    methodAnalysis.Kind = MethodKind.Constructor;
+                    break;
+                case DestructorDeclarationSyntax dds:
+                    body = dds.Body;
+                    expressionBody = dds.ExpressionBody;
+                    methodAnalysis.Kind = MethodKind.Destructor;
+                    break;
+                case OperatorDeclarationSyntax ods:
+                    body = ods.Body;
+                    expressionBody = ods.ExpressionBody;
+                    methodAnalysis.Kind = MethodKind.Operator;
+                    break;
+                case ConversionOperatorDeclarationSyntax cods:
+                    body = cods.Body;
+                    expressionBody = cods.ExpressionBody;
+                    methodAnalysis.Kind = MethodKind.ConversionOperator;
+                    break;
+                case IndexerDeclarationSyntax ids:
+                    body = null;
+                    expressionBody = ids.ExpressionBody;
+                    methodAnalysis.Kind = MethodKind.IndexGetter;
+                    break;
+                default:
+                    throw new NotImplementedException($"unimplemented declaration type {declaration.GetType()}");
+            }
+            
+            
+
+            
+
+            if (body == null && expressionBody == null) // no body or expressionbody, this is the case for { get; set; }-style property declarations etc
+            {
+                return methodAnalysis;
+            }
+
+            SyntaxNode actualBody = (SyntaxNode) body ?? expressionBody;
+
             // analyze calls
-            methodAnalysis.HasImpureCalls = !declaration.Body.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            methodAnalysis.HasImpureCalls = !actualBody.DescendantNodes().OfType<InvocationExpressionSyntax>()
                 .All(
                     invocation =>
                     {
@@ -67,6 +164,7 @@ namespace pure
                         var analysis = AnalyzeMethod(invokedMethod);
                         return analysis.IsPure;
                     });
+            
 
             // analyze return
             methodAnalysis.HasVoidReturn = method.ReturnsVoid;
@@ -75,27 +173,27 @@ namespace pure
             methodAnalysis.HasOutParams = method.Parameters.Any(param => param.RefKind == RefKind.Out);
 
             // new
-            methodAnalysis.HasNew = declaration.Body.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().Any();
+            methodAnalysis.HasNew = actualBody.DescendantNodes().OfType<ObjectCreationExpressionSyntax>().Any();
 
             // unsafe
-            methodAnalysis.HasUnsafe = declaration.Body.DescendantNodes().OfType<UnsafeStatementSyntax>().Any()
-                                       || declaration.GetLeadingTrivia().Any(trivia => trivia.Token.Text == "unsafe");
+            methodAnalysis.HasUnsafe = actualBody.DescendantNodes().OfType<UnsafeStatementSyntax>().Any()
+                                       || declaration.GetLeadingTrivia()
+                                           .Any(trivia => trivia.Token.Text == "unsafe");
 
             // try
-            methodAnalysis.HasTries = declaration.Body.DescendantNodes().OfType<TryStatementSyntax>().Any();
+            methodAnalysis.HasTries = actualBody.DescendantNodes().OfType<TryStatementSyntax>().Any();
 
             // locks
-            methodAnalysis.HasLocks = declaration.Body.DescendantNodes().OfType<LockStatementSyntax>().Any();
+            methodAnalysis.HasLocks = actualBody.DescendantNodes().OfType<LockStatementSyntax>().Any();
 
             // throws
-            methodAnalysis.HasThrows = declaration.Body.DescendantNodes().OfType<ThrowStatementSyntax>().Any();
-
+            methodAnalysis.HasThrows = actualBody.DescendantNodes().OfType<ThrowStatementSyntax>().Any();
             // reads and writes
 
             var reads = new List<SyntaxNode>();
             var writes = new List<SyntaxNode>();
 
-            writes.AddRange(declaration.Body.DescendantNodes().OfType<AssignmentExpressionSyntax>()
+            writes.AddRange(actualBody.DescendantNodes().OfType<AssignmentExpressionSyntax>()
                 .Select(aes => aes.Left));
 
 
@@ -129,16 +227,18 @@ namespace pure
                         return implicitArrayCreationExpressionSyntax.Initializer.Expressions.SelectMany(e =>
                             extractReads(e));
                     case BinaryExpressionSyntax binaryExpressionSyntax:
-                        var list = new List<SyntaxNode>();
-                        list.AddRange(extractReads(binaryExpressionSyntax.Left));
-                        list.AddRange(extractReads(binaryExpressionSyntax.Right));
-                        return list;
+                        return extractReads(binaryExpressionSyntax.Left)
+                            .Concat(extractReads(binaryExpressionSyntax.Right));
                     case AssignmentExpressionSyntax assignmentExpressionSyntax:
                         return extractReads(assignmentExpressionSyntax.Right);
                     case PrefixUnaryExpressionSyntax prefixUnaryExpressionSyntax:
                         return extractReads(prefixUnaryExpressionSyntax.Operand);
                     case ParenthesizedExpressionSyntax parenthesizedExpressionSyntax:
                         return extractReads(parenthesizedExpressionSyntax.Expression);
+                    case ElementAccessExpressionSyntax elementAccessExpressionSyntax:
+                        return
+                            elementAccessExpressionSyntax.ArgumentList.Arguments.SelectMany(a =>
+                                extractReads(a.Expression)).Concat(extractReads(elementAccessExpressionSyntax.Expression));
                 }
 
                 return new List<SyntaxNode>();
@@ -153,90 +253,100 @@ namespace pure
             // the same problem exists for the writes where currently all `Left`s of all `AssignmentExpressionSyntax`es are added, even if they are in a local function and for all the other checks (impure calls, new, unsafe, throws, tries, locks) 
             // possible solution: extract this loop into a function, call it with only the top-level statements, then recursively descend into nested block statements with special treatment for local functions
             // for writes there is also the problem that it currently catches writes in `new TypeName{Prop = Value}` initializers
-            foreach (var statement in declaration.Body.DescendantNodes().OfType<StatementSyntax>())
-                switch (statement)
-                {
-                    case CommonForEachStatementSyntax commonForEachStatement:
-                        reads.AddRange(extractReads(commonForEachStatement.Expression));
-                        break;
-                    case DoStatementSyntax doStatement:
-                        reads.AddRange(extractReads(doStatement.Condition));
-                        break;
-                    case ExpressionStatementSyntax expressionStatement:
-                        if (expressionStatement.Expression is AssignmentExpressionSyntax aes)
-                            reads.AddRange(extractReads(aes.Right));
-                        else if (expressionStatement.Expression is InvocationExpressionSyntax invocationExpressionSyntax
-                        )
-                            reads.AddRange(extractReads(invocationExpressionSyntax));
-                        else
-                            throw new NotImplementedException(
-                                $"unimplemented expression type {expressionStatement.Expression.GetType()}");
-                        break;
-                    case ForStatementSyntax forStatement:
-                        reads.AddRange(extractReads(forStatement.Condition));
-                        if (forStatement.Declaration != null)
-                            reads.AddRange(
-                                forStatement.Declaration.Variables.SelectMany(v => extractReads(v.Initializer.Value)));
-                        foreach (var ae in forStatement.Initializers.Select(i => (AssignmentExpressionSyntax) i))
-                            reads.AddRange(extractReads(ae.Right));
+            if (body != null)
+            {
+                foreach (var statement in body.DescendantNodes().OfType<StatementSyntax>())
+                    switch (statement)
+                    {
+                        case CommonForEachStatementSyntax commonForEachStatement:
+                            reads.AddRange(extractReads(commonForEachStatement.Expression));
+                            break;
+                        case DoStatementSyntax doStatement:
+                            reads.AddRange(extractReads(doStatement.Condition));
+                            break;
+                        case ExpressionStatementSyntax expressionStatement:
+                            if (expressionStatement.Expression is AssignmentExpressionSyntax aes)
+                                reads.AddRange(extractReads(aes.Right));
+                            else if (expressionStatement.Expression is InvocationExpressionSyntax
+                                invocationExpressionSyntax
+                            )
+                                reads.AddRange(extractReads(invocationExpressionSyntax));
+                            else
+                                throw new NotImplementedException(
+                                    $"unimplemented expression type {expressionStatement.Expression.GetType()}");
+                            break;
+                        case ForStatementSyntax forStatement:
+                            reads.AddRange(extractReads(forStatement.Condition));
+                            if (forStatement.Declaration != null)
+                                reads.AddRange(
+                                    forStatement.Declaration.Variables.SelectMany(
+                                        v => extractReads(v.Initializer.Value)));
+                            foreach (var ae in forStatement.Initializers.Select(i => (AssignmentExpressionSyntax) i))
+                                reads.AddRange(extractReads(ae.Right));
 
-                        foreach (var incrementor in forStatement.Incrementors)
-                            switch (incrementor)
+                            foreach (var incrementor in forStatement.Incrementors)
+                                switch (incrementor)
+                                {
+                                    case PostfixUnaryExpressionSyntax postfixUnaryExpressionSyntax:
+                                        writes.Add(postfixUnaryExpressionSyntax.Operand);
+                                        break;
+                                    case PrefixUnaryExpressionSyntax prefixUnaryExpressionSyntax:
+                                        writes.Add(prefixUnaryExpressionSyntax.Operand);
+                                        break;
+                                    case AssignmentExpressionSyntax assignmentExpressionSyntax:
+                                        // writes are already added when all `Left`s of all assignment expressions are added
+                                        reads.AddRange(extractReads(assignmentExpressionSyntax.Right));
+                                        break;
+                                    default:
+                                        throw new NotImplementedException(
+                                            $"unimplemented incrementor type {incrementor.GetType()}");
+                                }
+
+                            break;
+                        case IfStatementSyntax ifStatement:
+                            reads.AddRange(extractReads(ifStatement.Condition));
+                            break;
+                        case LocalDeclarationStatementSyntax localDeclarationStatement:
+                            reads.AddRange(localDeclarationStatement.Declaration.Variables
+                                .Where(v => v.Initializer != null)
+                                .SelectMany(v => extractReads(v.Initializer.Value)));
+                            break;
+                        case LockStatementSyntax lockStatement:
+                            reads.AddRange(extractReads(lockStatement.Expression));
+                            writes.Add(lockStatement.Expression);
+                            break;
+                        case ReturnStatementSyntax returnStatement:
+                            reads.AddRange(extractReads(returnStatement.Expression));
+                            break;
+                        case SwitchStatementSyntax switchStatement:
+                            reads.AddRange(extractReads(switchStatement.Expression));
+                            break;
+                        case ThrowStatementSyntax throwStatement:
+                            reads.AddRange(extractReads(throwStatement.Expression));
+                            break;
+                        case UsingStatementSyntax usingStatement:
+                            if (usingStatement.Expression != null)
                             {
-                                case PostfixUnaryExpressionSyntax postfixUnaryExpressionSyntax:
-                                    writes.Add(postfixUnaryExpressionSyntax.Operand);
-                                    break;
-                                case PrefixUnaryExpressionSyntax prefixUnaryExpressionSyntax:
-                                    writes.Add(prefixUnaryExpressionSyntax.Operand);
-                                    break;
-                                case AssignmentExpressionSyntax assignmentExpressionSyntax:
-                                    // writes are already added when all `Left`s of all assignment expressions are added
-                                    reads.AddRange(extractReads(assignmentExpressionSyntax.Right));
-                                    break;
-                                default:
-                                    throw new NotImplementedException(
-                                        $"unimplemented incrementor type {incrementor.GetType()}");
+                                var assignment = (AssignmentExpressionSyntax) usingStatement.Expression;
+                                reads.AddRange(extractReads(assignment.Right));
                             }
 
-                        break;
-                    case IfStatementSyntax ifStatement:
-                        reads.AddRange(extractReads(ifStatement.Condition));
-                        break;
-                    case LocalDeclarationStatementSyntax localDeclarationStatement:
-                        reads.AddRange(localDeclarationStatement.Declaration.Variables.Where(v => v.Initializer != null)
-                            .SelectMany(v => extractReads(v.Initializer.Value)));
-                        break;
-                    case LockStatementSyntax lockStatement:
-                        reads.AddRange(extractReads(lockStatement.Expression));
-                        writes.Add(lockStatement.Expression);
-                        break;
-                    case ReturnStatementSyntax returnStatement:
-                        reads.AddRange(extractReads(returnStatement.Expression));
-                        break;
-                    case SwitchStatementSyntax switchStatement:
-                        reads.AddRange(extractReads(switchStatement.Expression));
-                        break;
-                    case ThrowStatementSyntax throwStatement:
-                        reads.AddRange(extractReads(throwStatement.Expression));
-                        break;
-                    case UsingStatementSyntax usingStatement:
-                        if (usingStatement.Expression != null)
-                        {
-                            var assignment = (AssignmentExpressionSyntax) usingStatement.Expression;
-                            reads.AddRange(extractReads(assignment.Right));
-                        }
-
-                        if (usingStatement.Declaration != null)
-                            reads.AddRange(
-                                usingStatement.Declaration.Variables.SelectMany(v => extractReads(v.Initializer)));
-                        break;
-                    case WhileStatementSyntax whileStatement:
-                        reads.AddRange(extractReads(whileStatement.Condition));
-                        break;
-                    case YieldStatementSyntax yieldStatement:
-                        reads.AddRange(extractReads(yieldStatement.Expression));
-                        break;
-                }
+                            if (usingStatement.Declaration != null)
+                                reads.AddRange(
+                                    usingStatement.Declaration.Variables.SelectMany(v => extractReads(v.Initializer)));
+                            break;
+                        case WhileStatementSyntax whileStatement:
+                            reads.AddRange(extractReads(whileStatement.Condition));
+                            break;
+                        case YieldStatementSyntax yieldStatement:
+                            reads.AddRange(extractReads(yieldStatement.Expression));
+                            break;
+                    }
+            }
+            else
+            {
+                reads.AddRange(extractReads(expressionBody.Expression));
+            }
 
 
             IEnumerable<SyntaxNode> getIdentifierHierarchy(SyntaxNode read)
@@ -261,6 +371,9 @@ namespace pure
                             case ThisExpressionSyntax tes:
                                 hierarchy.Add(tes);
                                 break;
+                            case ElementAccessExpressionSyntax eaes:
+                                hierarchy.Add(eaes);
+                                break;
                             default:
                                 throw new NotImplementedException(
                                     $"unimplemented member access expression syntax {maes.Expression.GetType()}");
@@ -268,6 +381,8 @@ namespace pure
 
                         hierarchy.Add(maes.Name);
                         return hierarchy;
+                    case ElementAccessExpressionSyntax eaes:
+                        return new List<SyntaxNode>{eaes};
                     default:
                         throw new NotImplementedException($"unimplemented read expression syntax {read.GetType()}");
                 }

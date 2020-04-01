@@ -19,7 +19,7 @@ namespace pure
             foreach (var method in methods)
             {
                 var result = analyzer.AnalyzeMethod(method);
-                Console.WriteLine($"method {result.Name}: ");
+                Console.WriteLine($"method {result.Name}: {result.Kind}");
                 Console.WriteLine($"  Has [Pure]: {result.HasPureAttribute}");
                 Console.WriteLine($"  Has Void Return: {result.HasVoidReturn}");
                 Console.WriteLine($"  Has Out Params: {result.HasOutParams}");
