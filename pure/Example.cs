@@ -17,6 +17,7 @@ namespace HelloWorld
         public static int N = 1;
         public int M;
 
+
         public Data(string s, string s2, int m)
         {
             S = s;
@@ -27,6 +28,11 @@ namespace HelloWorld
         public Data(int m) : this("foo", "bar", 1)
         {
             N = m;
+        }
+
+        public Data(string s) : this(s, "foo", 0)
+        {
+            
         }
 
         public static implicit operator int(Data d) => N + d.M;
@@ -40,7 +46,7 @@ namespace HelloWorld
 
         public string S2 { get; }
 
-        public int this[int _]
+        public Data this[int _]
         {
             get => N;
             set => N = value;
@@ -118,9 +124,9 @@ namespace HelloWorld
             const int c = 1;
             var d1 = new Data {M = 1};
             var d2 = new Data();
-            d2.M = 2;
+            d2.M += 2;
             var foobar = d2["foobar"];
-            d2[1] = 3;
+            d2[1] -= 3;
             var num = getNum(d1);
 
             var asdf = new[] {"foo", "bar"};
@@ -129,6 +135,11 @@ namespace HelloWorld
             for (var i = 0; i < 12; i++) num -= i;
             for (var i = 0; i < 12; i += a) num -= i;
 
+            var d3 = d1 + d2;
+            var d4 = -d1;
+            var d5 = (Data) 1;
+            var i6 = (int) d3;
+            int i7 = d3;
 
             var x = d2.M = c + num;
 

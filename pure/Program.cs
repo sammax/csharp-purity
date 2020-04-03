@@ -3,11 +3,6 @@ using System.IO;
 
 namespace pure
 {
-    internal class Data
-    {
-        public static int N = 1;
-    }
-
     internal class Program
     {
         private static void Main(string[] args)
@@ -24,8 +19,15 @@ namespace pure
                 Console.WriteLine($"  Has Void Return: {result.HasVoidReturn}");
                 Console.WriteLine($"  Has Out Params: {result.HasOutParams}");
                 Console.WriteLine($"  Has Impure Calls: {result.HasImpureCalls}");
-                Console.WriteLine($"  Has New: {result.HasNew}");
-                Console.WriteLine($"  Has Unsafe: {result.HasUnsafe}");
+                if (result.HasImpureCalls)
+                    foreach (var read in result.ImpureCalls)
+                        Console.WriteLine(
+                            $"    {read.Name} at {read.Location.Source}:{read.Location.Line}:{read.Location.Character} ({read.Location.SpanStart})");
+                Console.WriteLine($"  Has Reference New: {result.HasReferenceNews}");
+                if (result.HasReferenceNews)
+                    foreach (var read in result.ReferenceNews)
+                        Console.WriteLine(
+                            $"    {read.Name} at {read.Location.Source}:{read.Location.Line}:{read.Location.Character} ({read.Location.SpanStart})");
                 Console.WriteLine($"  Has Non-Local Reads: {result.HasNonLocalReads}");
                 if (result.HasNonLocalReads)
                     foreach (var read in result.NonLocalReads)
@@ -36,10 +38,26 @@ namespace pure
                     foreach (var write in result.NonLocalWrites)
                         Console.WriteLine(
                             $"    {write.Name} at {write.Location.Source}:{write.Location.Line}:{write.Location.Character} ({write.Location.SpanStart})");
-                Console.WriteLine($"  Has Unsafe: {result.HasUnsafe}");
+                Console.WriteLine($"  Has Unsafe: {result.HasUnsafes}");
+                if (result.HasUnsafes)
+                    foreach (var read in result.Unsafes)
+                        Console.WriteLine(
+                            $"    at {read.Source}:{read.Line}:{read.Character} ({read.SpanStart})");
                 Console.WriteLine($"  Has Tries: {result.HasTries}");
+                if (result.HasTries)
+                    foreach (var read in result.Tries)
+                        Console.WriteLine(
+                            $"    at {read.Source}:{read.Line}:{read.Character} ({read.SpanStart})");
                 Console.WriteLine($"  Has Locks: {result.HasLocks}");
+                if (result.HasLocks)
+                    foreach (var read in result.Locks)
+                        Console.WriteLine(
+                            $"    at {read.Source}:{read.Line}:{read.Character} ({read.SpanStart})");
                 Console.WriteLine($"  Has Throws: {result.HasThrows}");
+                if (result.HasThrows)
+                    foreach (var read in result.Throws)
+                        Console.WriteLine(
+                            $"    at {read.Source}:{read.Line}:{read.Character} ({read.SpanStart})");
                 Console.Write("  => Is ");
                 Console.WriteLine(result.IsPure ? "Pure" : "Impure");
             }
